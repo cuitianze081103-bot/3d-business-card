@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Evan Cui — Nature Card</title>
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-512.png">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Forest Card">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#e8eddb">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;
+    background:radial-gradient(120% 90% at 50% 28%,#f8f4ea 0%,#e8eddb 55%,#d2dec4 100%);
+    font-family:Inter,system-ui,sans-serif;color:#3d4a35;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  canvas{display:block;touch-action:none;cursor:grab}
+  canvas.dragging{cursor:grabbing}
+  .ui{position:fixed;left:0;right:0;bottom:max(22px,env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none}
+  .hint{font-size:10px;letter-spacing:.12em;text-transform:uppercase;opacity:.5;text-align:center;padding:0 16px}
+  button{pointer-events:auto;font:600 13px Inter,system-ui,sans-serif;letter-spacing:.04em;padding:10px 22px;border-radius:999px;
+    border:1px solid rgba(61,74,53,.16);background:rgba(255,255,255,.72);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+    color:#3d4a35;cursor:pointer;transition:transform .2s,background .2s}
+  button:hover{background:#fff}
+  button:active{transform:scale(.96)}
+  #msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;opacity:.6}
+  #hold{position:fixed;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;pointer-events:none;z-index:6;
+    opacity:0;transform:scale(.6);transition:opacity .15s,transform .15s;
+    background:conic-gradient(rgba(25,35,30,.85) calc(var(--p,0)*360deg), rgba(25,35,30,.15) 0);
+    -webkit-mask:radial-gradient(circle,transparent 30px,#000 31px);mask:radial-gradient(circle,transparent 30px,#000 31px)}
+  #hold.show{opacity:1;transform:scale(1)}
+  #hold.ready{background:#fff;box-shadow:0 0 0 2px rgba(25,35,30,.6)}
+  #toast{position:fixed;left:50%;top:max(18px,env(safe-area-inset-top));z-index:7;transform:translate(-50%,-16px);opacity:0;pointer-events:none;
+    transition:opacity .25s,transform .25s;font:600 13px Inter,system-ui,sans-serif;letter-spacing:.03em;text-decoration:none;color:#1d2a24;
+    padding:11px 20px;border-radius:999px;background:rgba(255,255,255,.88);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 6px 20px rgba(0,0,0,.12)}
+  #toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+</style>
+</head>
+<body>
+<div id="msg">Growing the forest…</div>
+<div class="ui">
+  <button id="flip">Flip card</button>
+  <div class="hint" id="hint">Drag to spin · Pinch to zoom · Double-tap to flip<br>Hold to open portfolio</div>
+</div>
+
+<script>
+  window.addEventListener('error', function (e) {
+    var m = document.getElementById('msg') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'msg' }));
+    m.style.cssText = 'position:fixed;left:12px;right:12px;top:12px;font:12px monospace;color:#a33;background:#fff;padding:10px;border-radius:8px;z-index:9;white-space:pre-wrap';
+    m.textContent = 'Error: ' + (e.message || e) + (e.filename ? '\n' + e.filename.split('/').pop() + ':' + e.lineno : '');
+  });
+  window.addEventListener('unhandledrejection', function (e) { window.dispatchEvent(new ErrorEvent('error', { message: String(e.reason && e.reason.stack || e.reason) })); });
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>if (typeof THREE === 'undefined') document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/script>');</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>if (typeof qrcode === 'undefined') document.write('<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"><\/script>');</script>
+<script>
+/* ============ EDIT YOUR INFO HERE ============ */
+const CONFIG = {
+  name: 'EVAN CUI',
+  title: 'Interaction Design',
+  school: 'ArtCenter College of Design',
+  contact: 'Pasadena, CA',
+  link: 'https://your-portfolio.com',   // QR code target — replace with your real link
+  linkLabel: 'your-portfolio.com'
+};
+/* ============================================ */
+
+if (typeof THREE === 'undefined') {
+  document.getElementById('msg').textContent = 'Could not load 3D engine.';
+} else {
+  init();
+}
+
+async function init() {
+  try { await Promise.all([document.fonts.load('800 80px Inter'), document.fonts.load('500 40px Inter'), document.fonts.load('400 30px Inter'), document.fonts.load('600 30px Inter')]); } catch (e) {}
+  document.getElementById('msg').remove();
+
+  // ---------- constants ----------
+  const W = 6.8, H = 4.2, T = 0.1, BEV = 0.03, S = T / 2 + BEV;
+  const LAKE = { x: 0.7, y: -0.2, rx: 1.1, ry: 0.68 };
+  const PI = Math.PI;
+
+  function rng(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---------- renderer / scene ----------
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.prepend(renderer.domElement);
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 200);
+  // zoom + pan state
+  const PXS = { value: 1 };
+  let baseD = 10, zoom = 1, zoomT = 1;
+  const ZMIN = 0.75, ZMAX = 5;
+  const focus = new THREE.Vector3(), focusT = new THREE.Vector3();   // card-local point kept at screen center
+  const tanH = () => Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  function placeCamera() {
+    camera.position.set(0, 0.2, baseD / zoom);
+    camera.lookAt(0, -0.1, 0);
+  }
+  function clampFocus() {
+    const k = Math.max(0, 1 - 1 / zoomT);
+    focusT.x = THREE.MathUtils.clamp(focusT.x, -3.3 * k, 3.3 * k);
+    focusT.y = THREE.MathUtils.clamp(focusT.y, -2.0 * k, 2.0 * k);
+    focusT.z = 0;
+  }
+  const ray = new THREE.Raycaster(), plane = new THREE.Plane(), ndc = new THREE.Vector2();
+  const tmpN = new THREE.Vector3(), tmpO = new THREE.Vector3(), hit = new THREE.Vector3();
+  function pickLocal(sx, sy) {           // card-local point under a screen position
+    card.updateMatrixWorld(); camera.updateMatrixWorld();
+    ndc.set(sx / innerWidth * 2 - 1, -(sy / innerHeight) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    tmpN.set(0, 0, 1).applyQuaternion(card.quaternion);
+    plane.setFromNormalAndCoplanarPoint(tmpN, card.getWorldPosition(tmpO));
+    if (!ray.ray.intersectPlane(plane, hit)) return null;
+    return card.worldToLocal(hit.clone());
+  }
+  // zoom by factor f toward the point under (sx, sy)
+  function zoomAt(sx, sy, f) {
+    const nz = THREE.MathUtils.clamp(zoomT * f, ZMIN, ZMAX);
+    const P = pickLocal(sx, sy), r = zoomT / nz;
+    if (P && nz > 1) { focusT.x = P.x + (focusT.x - P.x) * r; focusT.y = P.y + (focusT.y - P.y) * r; }
+    zoomT = nz; clampFocus();
+  }
+  // drag the card under the fingers
+  function panBy(x0, y0, x1, y1) {
+    const A = pickLocal(x0, y0), B = pickLocal(x1, y1);
+    if (!A || !B) return;
+    focusT.x -= B.x - A.x; focusT.y -= B.y - A.y; clampFocus();
+  }
+  function fit() {
+    const a = innerWidth / innerHeight;
+    camera.aspect = a;
+    const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    baseD = Math.max(4.5 / (t * a), 3.6 / t);
+    PXS.value = innerHeight * renderer.getPixelRatio() / (2 * t);
+    camera.updateProjectionMatrix();
+    placeCamera();
+    renderer.setSize(innerWidth, innerHeight);
+  }
+  fit();
+  addEventListener('resize', fit);
+
+  scene.add(new THREE.HemisphereLight(0xeef7ff, 0x9c8a64, 0.78));
+  const sun = new THREE.DirectionalLight(0xfff0d4, 0.85);
+  sun.position.set(5, 8, 9);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 30 });
+  sun.shadow.bias = -0.0008;
+  sun.shadow.normalBias = 0.02;
+  scene.add(sun);
+
+  const mat = (c, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.95, flatShading: true }, o));
+
+  // ---------- textures ----------
+  function soilTex() {
+    const c = document.createElement('canvas'); c.width = 8; c.height = 256;
+    const g = c.getContext('2d');
+    const bands = [[0, .07, '#3f7436'], [.07, .12, '#2f5a2a'], [.12, .34, '#9a6a44'], [.34, .41, '#7e5434'], [.41, .59, '#a87650'],
+      [.59, .66, '#7e5434'], [.66, .88, '#9a6a44'], [.88, .93, '#2f5a2a'], [.93, 1, '#3f7436']];
+    bands.forEach(([a, b, col]) => { g.fillStyle = col; g.fillRect(0, a * 256, 8, (b - a) * 256 + 1); });
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    const z0 = -BEV, z1 = T + BEV;            // side-wall v = 1 - z
+    const v0 = 1 - z1, v1 = 1 - z0;
+    t.repeat.set(1, 1 / (v1 - v0));
+    t.offset.set(0, -v0 / (v1 - v0));
+    return t;
+  }
+  function grassTex() {
+    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const g = c.getContext('2d'); const r = rng(3);
+    g.fillStyle = '#356630'; g.fillRect(0, 0, 256, 256);
+    const cols = ['#2f5e2b', '#3f7436', '#2a5426', '#46803b'];
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = cols[i % 4]; g.globalAlpha = 0.5;
+      g.beginPath(); g.arc(r() * 256, r() * 256, 1 + r() * 3, 0, PI * 2); g.fill();
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(0.4, 0.4); t.anisotropy = maxAniso;
+    return t;
+  }
+  function dotTex() {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.4, 'rgba(255,253,235,.8)'); gr.addColorStop(1, 'rgba(255,253,235,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+  }
+  function plaqueTex() {
+    const c = document.createElement('canvas'); c.width = 1024; c.height = 410;
+    const g = c.getContext('2d'); const r = rng(7);
+    g.fillStyle = '#efd6a8'; g.fillRect(0, 0, 1024, 410);
+    g.strokeStyle = 'rgba(130,82,40,0.26)'; g.lineWidth = 2.5;
+    for (let i = 0; i < 24; i++) {
+      const y = r() * 410; g.beginPath(); g.moveTo(0, y);
+      for (let x = 0; x <= 1024; x += 32) g.lineTo(x, y + Math.sin(x * 0.008 + i) * 5);
+      g.stroke();
+    }
+    g.strokeStyle = 'rgba(110,70,35,0.28)'; g.lineWidth = 3; g.strokeRect(24, 24, 976, 362);
+    g.fillStyle = '#3e2a19';
+    try { g.letterSpacing = '3px'; } catch (e) {}
+    g.font = '800 100px Inter, sans-serif'; g.fillText(CONFIG.name, 66, 158);
+    try { g.letterSpacing = '0px'; } catch (e) {}
+    g.fillStyle = '#5b4027'; g.font = '500 46px Inter, sans-serif'; g.fillText(CONFIG.title, 68, 232);
+    g.fillStyle = 'rgba(91,64,39,.78)'; g.font = '400 32px Inter, sans-serif';
+    g.fillText(CONFIG.school, 68, 296); g.fillText(CONFIG.contact, 68, 342);
+    // little sprout mark
+    g.save(); g.translate(905, 300); g.fillStyle = '#6f9a48';
+    g.beginPath(); g.ellipse(-22, -40, 26, 13, -0.6, 0, PI * 2); g.fill();
+    g.beginPath(); g.ellipse(22, -52, 30, 14, 0.6, 0, PI * 2); g.fill();
+    g.strokeStyle = '#6f9a48'; g.lineWidth = 6; g.beginPath(); g.moveTo(0, 30); g.quadraticCurveTo(-4, -10, 4, -46); g.stroke();
+    g.restore();
+    const t = new THREE.CanvasTexture(c); t.anisotropy = maxAniso; return t;
+  }
+  function slabTex() {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 614;
+    const g = c.getContext('2d');
+    g.fillStyle = '#e7e1d3'; g.fillRect(0, 0, 512, 614);
+    const r = rng(5); g.fillStyle = 'rgba(120,110,95,.08)';
+    for (let i = 0; i < 260; i++) { g.beginPath(); g.arc(r() * 512, r() * 614, r() * 4, 0, PI * 2); g.fill(); }
+    // QR card
+    const box = 452, bx = (512 - box) / 2, by = 24;
+    g.fillStyle = '#fbf8f1'; roundRectPath(g, bx, by, box, box, 26); g.fill();
+    if (typeof qrcode !== 'undefined') {
+      const qr = qrcode(0, 'M'); qr.addData(CONFIG.link); qr.make();
+      const n = qr.getModuleCount(), cell = Math.floor((box - 48) / n), off = bx + (box - cell * n) / 2, offY = by + (box - cell * n) / 2;
+      g.fillStyle = '#2f4a2c';
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) g.fillRect(off + x * cell, offY + y * cell, cell, cell);
+    } else {
+      g.fillStyle = '#2f4a2c'; g.font = '600 26px Inter'; g.textAlign = 'center'; g.fillText('QR unavailable', 256, by + box / 2);
+    }
+    g.textAlign = 'center'; g.fillStyle = '#3c4a34';
+    try { g.letterSpacing = '6px'; } catch (e) {}
+    g.font = '600 28px Inter, sans-serif'; g.fillText('SCAN TO CONNECT', 256, 530);
+    try { g.letterSpacing = '0px'; } catch (e) {}
+    g.fillStyle = 'rgba(60,74,52,.7)'; g.font = '400 26px Inter, sans-serif'; g.fillText(CONFIG.linkLabel, 256, 574);
+    const t = new THREE.CanvasTexture(c); t.anisotropy = maxAniso; return t;
+  }
+  function roundRectPath(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+
+  // ---------- card body (with a lake hole through it) ----------
+  function roundRect(w, h, r) {
+    const s = new THREE.Shape(), x = -w / 2, y = -h / 2;
+    s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r);
+    s.lineTo(x + w, y + h - r); s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    s.lineTo(x + r, y + h); s.quadraticCurveTo(x, y + h, x, y + h - r);
+    s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
+    return s;
+  }
+  function lakePts(scale = 1) {
+    const pts = [];
+    for (let i = 0; i < 56; i++) {
+      const a = i / 56 * PI * 2;
+      const r = (1 + 0.07 * Math.sin(3 * a + 0.5) + 0.04 * Math.cos(5 * a)) * scale;
+      pts.push(new THREE.Vector2(LAKE.x + LAKE.rx * r * Math.cos(a), LAKE.y + LAKE.ry * r * Math.sin(a)));
+    }
+    return pts;
+  }
+  const shape = roundRect(W, H, 0.42);
+  const hole = new THREE.Path(); hole.setFromPoints(lakePts().reverse()); hole.closePath();
+  shape.holes.push(hole);
+
+  const cardGeo = new THREE.ExtrudeGeometry(shape, { depth: T, bevelEnabled: true, bevelThickness: BEV, bevelSize: BEV, bevelSegments: 3, curveSegments: 24 });
+  cardGeo.translate(0, 0, -T / 2);
+  const capMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: grassTex(), roughness: 1 });
+  const sideMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: soilTex(), roughness: 1 });
+
+  const card = new THREE.Group();
+  scene.add(card);
+  const cardMesh = new THREE.Mesh(cardGeo, [capMat, sideMat]);
+  cardMesh.receiveShadow = true; cardMesh.castShadow = true;
+  card.add(cardMesh);
+
+  // water (visible from both sides, like a window through the card)
+  const water = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(lakePts(1.0)), 1),
+    new THREE.MeshStandardMaterial({ color: 0x74c6d9, transparent: true, opacity: 0.85, roughness: 0.65, metalness: 0, side: THREE.DoubleSide }));
+  card.add(water);
+
+  // sun sparkles on the water (brightest when the card tilts the lake toward the sun)
+  const sparkles = [];
+  [1, -1].forEach(sign => {
+    const N = 46, pos = new Float32Array(N * 3), ph = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const a = Math.random() * PI * 2, d = Math.sqrt(Math.random()) * 0.85;
+      pos[i * 3] = LAKE.x + LAKE.rx * d * Math.cos(a); pos[i * 3 + 1] = LAKE.y + LAKE.ry * d * Math.sin(a); pos[i * 3 + 2] = sign * 0.022;
+      ph[i] = Math.random();
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPh', new THREE.BufferAttribute(ph, 1));
+    const m = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { uTime: { value: 0 }, uGlint: { value: 0 }, uScale: PXS },
+      vertexShader: `
+        attribute float aPh; uniform float uTime, uGlint, uScale; varying float vA;
+        void main(){
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          float tw = pow(max(sin(uTime * (1.4 + fract(aPh * 3.7) * 2.2) + aPh * 6.283), 0.0), 10.0);
+          vA = tw * uGlint;
+          gl_PointSize = max(1.0, 0.11 * uScale * (0.35 + tw) / -mv.z);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        varying float vA;
+        void main(){
+          vec2 c = gl_PointCoord - 0.5; float d = length(c);
+          float core = pow(max(0.0, 1.0 - d * 2.0), 3.0);
+          float rays = max(0.0, 1.0 - abs(c.x) * 14.0) * max(0.0, 1.0 - abs(c.y) * 2.2) + max(0.0, 1.0 - abs(c.y) * 14.0) * max(0.0, 1.0 - abs(c.x) * 2.2);
+          gl_FragColor = vec4(1.0, 0.96, 0.82, (core + rays * 0.6) * min(vA, 1.2));
+        }`
+    });
+    const p = new THREE.Points(g, m); p.frustumCulled = false; card.add(p);
+    sparkles.push({ m, sign });
+  });
+
+  // lily pads + ripples, in card coordinates
+  const padMat = mat('#3f7a35', { side: THREE.DoubleSide });
+  const ripples = [];
+  function lily(cx, cy, r, sign, flower) {
+    const m = new THREE.Mesh(new THREE.CircleGeometry(r, 24, 0.2, PI * 2 - 0.4), padMat);
+    m.position.set(cx, cy, sign * 0.014); m.rotation.z = cx * 3 + cy; if (sign < 0) m.rotation.y = PI;
+    card.add(m);
+    if (flower) {
+      const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.045, 0), mat('#f6b3c6'));
+      f.position.set(cx, cy, sign * 0.05); card.add(f);
+    }
+  }
+  [[1.3, -0.05, 0.16, true], [0.2, -0.5, 0.12, false], [0.95, -0.62, 0.1, false]].forEach(p => lily(p[0], p[1], p[2], 1, p[3]));
+  [[0.35, 0.15, 0.14, false], [1.35, -0.45, 0.12, true]].forEach(p => lily(p[0], p[1], p[2], -1, p[3]));
+  const rippleGeo = new THREE.RingGeometry(0.9, 1, 40);
+  [1, -1].forEach(sign => {
+    for (let i = 0; i < 2; i++) {
+      const m = new THREE.Mesh(rippleGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+      m.position.z = sign * 0.008; card.add(m);
+      ripples.push({ m, phase: i * 1.7 + (sign > 0 ? 0 : 0.9), cycle: -1 });
+    }
+  });
+
+  // ---------- shared geometry ----------
+  const hemiGeo = new THREE.SphereGeometry(1, 18, 7, 0, PI * 2, 0, PI / 2);
+  const coneGeo = new THREE.ConeGeometry(1, 1, 7); coneGeo.translate(0, 0.5, 0);
+  const trunkGeo = new THREE.CylinderGeometry(0.6, 1, 1, 6); trunkGeo.translate(0, 0.5, 0);
+  const blobGeo = new THREE.IcosahedronGeometry(1, 0);
+  const rockGeo = new THREE.DodecahedronGeometry(1, 0);
+  const stemGeo = new THREE.CylinderGeometry(0.035, 0.045, 0.12, 8); stemGeo.translate(0, 0.06, 0);
+  const capGeo = new THREE.SphereGeometry(0.09, 12, 6, 0, PI * 2, 0, PI / 2);
+  const dotGeo = new THREE.SphereGeometry(0.014, 6, 4);
+
+  const M = {
+    hills: [mat('#8cc063'), mat('#84ba5c'), mat('#95c76b')],
+    pine: [mat('#3f7d4e'), mat('#4a8c57'), mat('#58985f')],
+    round: [mat('#6fae4f'), mat('#86bf5c'), mat('#9acb68')],
+    trunk: mat('#7a5235'),
+    rock: [mat('#b9b3a6'), mat('#a39c8e'), mat('#c9c2b3')],
+    capRed: mat('#e2574c', { flatShading: false }), capBrown: mat('#c98a52', { flatShading: false }),
+    stem: mat('#f3e6cf', { flatShading: false }), white: mat('#ffffff', { flatShading: false }),
+    wood: mat('#b07d4f'), stone: mat('#cfc6b5'), reed: mat('#7aa452'), cattail: mat('#7a4f2e')
+  };
+  const shadow = (o) => { o.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } }); return o; };
+
+  const swayers = [], grassSets = [], pollenSets = [], butterflies = [];
+  const dot = dotTex();
+
+  // ---------- shell texturing grass ----------
+  // The same surface is drawn N times, each copy pushed a little further out along its normal.
+  // Each layer keeps only the pixels whose "blade" (a hashed grid cell) is tall enough → fuzzy 3D grass.
+  const SHELLS = Math.min(innerWidth, innerHeight) < 700 ? 10 : 14, SHELL_H = 0.045;
+  const BLADES = Math.min(innerWidth, innerHeight) < 700 ? 90000 : 160000;   // real blades per side
+
+  // shared wind / swing / gust uniforms (same objects referenced by every grass material)
+  const sunDir = sun.position.clone().normalize();
+  const FX = { uTime: { value: 0 }, uSwing: { value: new THREE.Vector2() }, uGust: { value: new THREE.Vector4(-9, 0, 1, 0) } };
+
+  // instanced 3D grass blades, wind animated on the GPU
+  const bladeBase = new THREE.BufferGeometry();
+  bladeBase.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, -0.32, 0.45, 0, 0.32, 0.45, 0, 0, 1, 0], 3));
+  bladeBase.setIndex([0, 1, 2, 1, 3, 2, 2, 3, 4]);
+  function bladeField(off, shp, tints, n, side) {
+    const g = new THREE.InstancedBufferGeometry();
+    g.index = bladeBase.index; g.setAttribute('position', bladeBase.attributes.position);
+    g.setAttribute('aOff', new THREE.InstancedBufferAttribute(off, 4));
+    g.setAttribute('aShp', new THREE.InstancedBufferAttribute(shp, 2));
+    g.setAttribute('aTint', new THREE.InstancedBufferAttribute(tints, 3));
+    g.instanceCount = n;
+    const m = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: { uTime: FX.uTime, uSwing: FX.uSwing, uGust: FX.uGust, uSide: { value: side }, uSun: { value: sunDir }, uBH: { value: 0.3 }, uBW: { value: 0.012 } },
+      vertexShader: `
+        attribute vec4 aOff; attribute vec2 aShp; attribute vec3 aTint;
+        uniform float uBH, uBW; uniform vec3 uSun;
+        uniform float uTime, uSide; uniform vec2 uSwing; uniform vec4 uGust;
+        float gustAt(vec2 v){ float pr = dot(v, uGust.zw); float q = (pr - uGust.x) / 0.8; return uGust.y * exp(-q * q); }
+        vec2 windAt(vec2 v){
+          float w = sin(uTime*1.7 + v.x*1.3 + v.y*0.8) * 0.5 + sin(uTime*2.9 + v.x*3.1) * 0.18 + 0.25;
+          vec2 d = vec2(1.0, 0.35) * w * 0.04;
+          d += uGust.zw * gustAt(v) * 0.18;
+          d += vec2(uSwing.x, uSide * uSwing.y);
+          return d;
+        }
+        varying vec3 vC;
+        void main(){
+          float y = position.y, s = aShp.x;
+          vec3 lp = vec3(position.x * uBW, y * uBH * s, 0.0);
+          vec2 v = vec2(aOff.x, -aOff.z);
+          vec2 d = windAt(v);
+          float g = gustAt(v);
+          float c = cos(aOff.w), sn = sin(aOff.w);
+          lp = vec3(lp.x * c, lp.y, lp.x * sn);
+          float bend = y * y * s;
+          vec2 own = vec2(sin(aShp.y), cos(aShp.y)) * 0.012;
+          lp.x += (d.x + own.x) * bend;
+          lp.z -= (d.y + own.y) * bend;
+          lp.y -= length(d) * bend * 0.35;
+          vec4 wp = modelMatrix * vec4(aOff.xyz + lp, 1.0);
+          vec3 up = normalize(mat3(modelMatrix) * vec3(0.0, 1.0, 0.0));
+          float diff = max(dot(up, uSun), 0.0);
+          vec3 col = mix(aTint * 0.55, aTint * 1.15 + vec3(0.03, 0.05, 0.0), y);
+          col *= 0.55 + 0.6 * diff;
+          // sunlight glinting off the blade surface (changes as the card turns and the wind moves blades)
+          float ang = aOff.w + (d.x - d.y) * 2.5;
+          vec3 nrm = normalize(mat3(modelMatrix) * vec3(-sin(ang), 0.3, cos(ang)));
+          vec3 V = normalize(cameraPosition - wp.xyz);
+          vec3 Hh = normalize(uSun + V);
+          float spec = pow(abs(dot(nrm, Hh)), 70.0) * y * diff;
+          col += vec3(1.0, 0.9, 0.55) * spec * (0.8 + 1.6 * g);
+          col += vec3(0.09, 0.11, 0.03) * g * y;
+          vC = col;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }`,
+      fragmentShader: `varying vec3 vC; void main(){ gl_FragColor = vec4(vC, 1.0); }`
+    });
+    shellMats.push(m);
+    const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false;
+    return mesh;
+  }
+  const shellMats = [];
+  function shellGrass(baseGeo, mode, panel, side) {
+    const geo = new THREE.InstancedBufferGeometry().copy(baseGeo);
+    geo.instanceCount = SHELLS;
+    const layers = new Float32Array(SHELLS);
+    for (let i = 0; i < SHELLS; i++) layers[i] = (i + 1) / SHELLS;
+    geo.setAttribute('layer', new THREE.InstancedBufferAttribute(layers, 1));
+    const base = new THREE.Color('#3a6b30');
+    const m = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: FX.uTime, uSwing: FX.uSwing, uGust: FX.uGust, uSide: { value: side },
+        uH: { value: SHELL_H }, uMode: { value: mode },
+        uPanel: { value: new THREE.Vector4(...(panel || [99, 99, 0, 0])) },
+        uBase: { value: base }, uTip: { value: new THREE.Color('#5e9440') },
+        uSun: { value: sunDir }, uDensity: { value: 80.0 }
+      },
+      vertexShader: `
+        attribute float layer;
+        attribute vec3 tint;
+        uniform float uH, uMode;
+        uniform float uTime, uSide; uniform vec2 uSwing; uniform vec4 uGust;
+        float gustAt(vec2 v){ float pr = dot(v, uGust.zw); float q = (pr - uGust.x) / 0.8; return uGust.y * exp(-q * q); }
+        vec2 windAt(vec2 v){
+          float w = sin(uTime*1.7 + v.x*1.3 + v.y*0.8) * 0.5 + sin(uTime*2.9 + v.x*3.1) * 0.18 + 0.25;
+          vec2 d = vec2(1.0, 0.35) * w * 0.04;
+          d += uGust.zw * gustAt(v) * 0.18;
+          d += vec2(uSwing.x, uSide * uSwing.y);
+          return d;
+        }
+        varying vec2 vP; varying float vL; varying vec3 vN; varying vec3 vTint; varying float vG;
+        void main(){
+          vec3 p = position;
+          vP = vec2(p.x, -p.z);
+          vL = layer; vTint = tint; vG = gustAt(vP);
+          p += normal * layer * uH;
+          vec2 wind = windAt(vP) * 0.8 * layer * layer;
+          p.xz += vec2(wind.x, -wind.y);
+          vN = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: `
+        uniform vec3 uBase, uTip, uSun; uniform float uDensity; uniform vec4 uPanel;
+        varying vec2 vP; varying float vL; varying vec3 vN; varying vec3 vTint; varying float vG;
+        float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        void main(){
+          if (abs(vP.x - uPanel.x) < uPanel.z && abs(vP.y - uPanel.y) < uPanel.w) discard;
+          vec2 g = mat2(0.83, -0.56, 0.56, 0.83) * vP * uDensity;    // rotated so cells don't line up with the card
+          vec2 id = floor(g);
+          vec2 f = fract(g) - 0.5 - (vec2(hash(id + 1.7), hash(id + 4.3)) - 0.5) * 0.6;
+          float h = 0.25 + 0.75 * hash(id);
+          // patchy meadow: some areas taller than others
+          h *= 0.55 + 0.45 * (0.5 + 0.5 * sin(vP.x * 1.7 + 1.3) * sin(vP.y * 2.1));
+          if (vL > h) discard;
+          float rad = 0.42 * (1.0 - vL / h);
+          if (length(f) > rad) discard;
+          vec3 col = mix(vTint * 0.8, uTip, pow(vL, 1.2) * 0.75) * (0.85 + 0.3 * hash(id + 7.3));
+          float diff = max(dot(normalize(vN), uSun), 0.0);
+          col *= 0.55 + 0.6 * diff + 0.15 * vL;
+          col += vec3(0.08, 0.1, 0.03) * vG * vL;
+          gl_FragColor = vec4(col, 1.0);
+        }`
+    });
+    shellMats.push(m);
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.frustumCulled = false;
+    return mesh;
+  }
+
+  // ---------- build one face as a little diorama ----------
+  function buildSide(cfg) {
+    const sign = cfg.sign, R = rng(cfg.seed);
+    const outer = new THREE.Group(); if (sign < 0) outer.rotation.y = PI;
+    const root = new THREE.Group(); root.position.z = S; root.rotation.x = PI / 2;
+    outer.add(root); card.add(outer);
+    // view coords: (vx, vy) as seen when facing this side; diorama = (vx, height, -vy)
+    const lake = { x: LAKE.x * sign, y: LAKE.y };
+    // signed distances used to shape the terrain
+    const ss = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const lakeD = (x, y) => {           // < 1 inside the lake hole
+      const dx = sign * (x - lake.x) / LAKE.rx, dy = (y - lake.y) / LAKE.ry, a = Math.atan2(dy, dx);
+      return Math.hypot(dx, dy) / (1 + 0.07 * Math.sin(3 * a + 0.5) + 0.04 * Math.cos(5 * a));
+    };
+    const edgeD = (x, y) => {           // > 0 inside the card
+      const r = 0.42, qx = Math.abs(x) - (W / 2 - r), qy = Math.abs(y) - (H / 2 - r);
+      return -(Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r);
+    };
+    const panelD = (x, y) => {          // > 0 outside the info panel
+      const p = cfg.panel, qx = Math.abs(x - p.x) - p.w / 2, qy = Math.abs(y - p.y) - p.h / 2;
+      return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0);
+    };
+    // one continuous horseshoe ridge wrapping the far side of the lake, sloping gently outward
+    const RIDGE_R = 1.95, RIDGE_H = 0.62;
+    const height = (x, y) => {
+      const dx = (x - lake.x) / LAKE.rx, dy = (y - lake.y) / LAKE.ry;
+      const d = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+      const t = d - RIDGE_R, w = t < 0 ? 0.55 : 1.25;                 // steeper toward the lake, long outer slope
+      const arc = ss(-0.45, 0.55, Math.sin(a));                       // half circle behind the lake, tapering at the ends
+      const crest = 1 + 0.18 * Math.sin(a * 5 + cfg.seed) + 0.1 * Math.sin(a * 9 - cfg.seed);
+      let h = RIDGE_H * crest * arc * Math.exp(-(t / w) * (t / w));
+      h += 0.03 * (Math.sin(x * 2.3 + cfg.seed) * Math.sin(y * 2.9) + 0.5 * Math.sin(x * 5.1 - y * 3.7) + 0.6);
+      return Math.max(h, 0) * ss(0.04, 0.6, edgeD(x, y)) * ss(1.0, 1.4, lakeD(x, y)) * ss(0.02, 0.4, panelD(x, y));
+    };
+    const ok = (x, y, m = 0.1) => edgeD(x, y) > 0.2 && lakeD(x, y) > 1.1 + m * 1.4 && panelD(x, y) > m;
+    const place = (o, x, y, sink = 0.02) => { o.position.set(x, height(x, y) - sink, -y); root.add(o); return o; };
+    const cLow = new THREE.Color('#2c5a28'), cHigh = new THREE.Color('#4a8238'), tmpC = new THREE.Color();
+    const tintAt = (x, y, h, jitter) => tmpC.copy(cLow).lerp(cHigh, Math.min(1, h / 0.65 + 0.15 * Math.sin(x * 3.1 + y * 2.2) + jitter));
+
+    // terrain mesh (dense grid, triangles outside the card / inside the lake removed)
+    const NX = 200, NY = 124;
+    const tg = new THREE.PlaneGeometry(W, H, NX, NY); tg.rotateX(-PI / 2);
+    const pa = tg.attributes.position, keep = new Uint8Array(pa.count), tints = new Float32Array(pa.count * 3);
+    for (let i = 0; i < pa.count; i++) {
+      const x = pa.getX(i), y = -pa.getZ(i), h = height(x, y);
+      pa.setY(i, h + 0.002);
+      keep[i] = edgeD(x, y) > 0.015 && lakeD(x, y) > 1.02 ? 1 : 0;
+      tintAt(x, y, h, 0).toArray(tints, i * 3);
+    }
+    const src = tg.index.array, idx = [];
+    for (let i = 0; i < src.length; i += 3) if (keep[src[i]] && keep[src[i + 1]] && keep[src[i + 2]]) idx.push(src[i], src[i + 1], src[i + 2]);
+    tg.setIndex(idx);
+    tg.setAttribute('tint', new THREE.BufferAttribute(tints, 3));
+    tg.setAttribute('color', new THREE.BufferAttribute(tints, 3));
+    tg.computeVertexNormals();
+    const terrain = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+    terrain.receiveShadow = true; terrain.castShadow = true; root.add(terrain);
+    // fuzzy undercoat: shell texturing on the terrain
+    const pc = cfg.panel;
+    root.add(shellGrass(tg, 1, [pc.x, pc.y, pc.w / 2 + 0.03, pc.h / 2 + 0.03], sign));
+    // real grass blades on top
+    {
+      const clear = cfg.mush.map(([x, y, s]) => [x, y, 0.16 * s]).concat(cfg.rocks.map(([x, y, s]) => [x, y, s * 1.25]));
+      const off = new Float32Array(BLADES * 4), shp = new Float32Array(BLADES * 2), bt = new Float32Array(BLADES * 3);
+      let n = 0, guard = 0;
+      while (n < BLADES && guard < BLADES * 4) {
+        guard++;
+        const x = (R() - 0.5) * W, y = (R() - 0.5) * H;
+        if (!(edgeD(x, y) > 0.16 && lakeD(x, y) > 1.05 && panelD(x, y) > 0.12)) continue;
+        if (clear.some(c => (x - c[0]) * (x - c[0]) + (y - c[1]) * (y - c[1]) < c[2] * c[2])) continue;
+        const h = height(x, y);
+        off[n * 4] = x; off[n * 4 + 1] = h; off[n * 4 + 2] = -y; off[n * 4 + 3] = R() * PI * 2;
+        shp[n * 2] = 0.45 + R() * 0.85; shp[n * 2 + 1] = R() * 6.28;
+        tintAt(x, y, h, (R() - 0.5) * 0.35).toArray(bt, n * 3);
+        n++;
+      }
+      root.add(bladeField(off, shp, bt, n, sign));
+    }
+
+    // trees
+    cfg.pines.forEach(([x, y, s]) => {
+      if (!ok(x, y, 0.02)) return;
+      const g = new THREE.Group();
+      const tr = new THREE.Mesh(trunkGeo, M.trunk); tr.scale.set(0.06 * s, 0.25 * s, 0.06 * s); g.add(tr);
+      [[0.16, 0.36, 0.5], [0.4, 0.29, 0.44], [0.62, 0.2, 0.4]].forEach(([yy, rr, hh], i) => {
+        const c = new THREE.Mesh(coneGeo, M.pine[(i + Math.floor(R() * 3)) % 3]);
+        c.scale.set(rr * s, hh * s, rr * s); c.position.y = yy * s; c.rotation.y = R() * PI; g.add(c);
+      });
+      place(shadow(g), x, y); swayers.push({ o: g, p: R() * 6, a: 0.025, sd: sign, k: 1 });
+    });
+    cfg.rounds.forEach(([x, y, s]) => {
+      if (!ok(x, y, 0.02)) return;
+      const g = new THREE.Group();
+      const tr = new THREE.Mesh(trunkGeo, M.trunk); tr.scale.set(0.055 * s, 0.42 * s, 0.055 * s); g.add(tr);
+      const c1 = new THREE.Mesh(blobGeo, M.round[Math.floor(R() * 3)]); c1.scale.setScalar(0.33 * s); c1.position.y = 0.62 * s; c1.rotation.set(R(), R(), R()); g.add(c1);
+      const c2 = new THREE.Mesh(blobGeo, M.round[Math.floor(R() * 3)]); c2.scale.setScalar(0.22 * s); c2.position.set(0.2 * s, 0.5 * s, 0.08 * s); g.add(c2);
+      place(shadow(g), x, y); swayers.push({ o: g, p: R() * 6, a: 0.03, sd: sign, k: 1 });
+    });
+
+    // rocks
+    cfg.rocks.forEach(([x, y, s]) => {
+      if (!ok(x, y, 0.0)) return;
+      const m = new THREE.Mesh(rockGeo, M.rock[Math.floor(R() * 3)]);
+      m.scale.set(s, s * 0.62, s * 0.85); m.rotation.set(R() * 0.4, R() * PI, R() * 0.4);
+      place(shadow(m), x, y, s * 0.18);
+    });
+    // pebbles around the shore
+    for (let i = 0; i < 12; i++) {
+      const a = R() * PI * 2, rr = 1.16 + R() * 0.08;
+      const x = lake.x + LAKE.rx * rr * Math.cos(a), y = lake.y + LAKE.ry * rr * Math.sin(a);
+      if (panelD(x, y) < 0.05) continue;
+      const s = 0.035 + R() * 0.04;
+      const m = new THREE.Mesh(rockGeo, M.rock[i % 3]); m.scale.set(s, s * 0.6, s); m.rotation.y = R() * PI;
+      place(shadow(m), x, y, s * 0.2);
+    }
+    // reeds
+    for (let c = 0; c < 2; c++) {
+      const a = cfg.reedAngles[c];
+      for (let i = 0; i < 5; i++) {
+        const aa = a + (R() - 0.5) * 0.35, rr = 1.12 + R() * 0.12;
+        const x = lake.x + LAKE.rx * rr * Math.cos(aa), y = lake.y + LAKE.ry * rr * Math.sin(aa);
+        const g = new THREE.Group(), h = 0.3 + R() * 0.2;
+        const st = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.012, h, 4), M.reed); st.position.y = h / 2; g.add(st);
+        if (R() > 0.35) { const ct = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.08, 6), M.cattail); ct.position.y = h - 0.04; g.add(ct); }
+        g.rotation.z = (R() - 0.5) * 0.25;
+        place(shadow(g), x, y, 0.0); swayers.push({ o: g, p: R() * 6, a: 0.07, sd: sign, k: 2.5 });
+      }
+    }
+
+    // mushrooms
+    cfg.mush.forEach(([x, y, s], i) => {
+      if (!ok(x, y, 0.0)) return;
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(stemGeo, M.stem));
+      const red = i % 3 !== 2;
+      const cap = new THREE.Mesh(capGeo, red ? M.capRed : M.capBrown); cap.position.y = 0.11; cap.scale.y = 0.8; g.add(cap);
+      if (red) for (let d = 0; d < 4; d++) {
+        const a = d / 4 * PI * 2 + R(), e = 0.5 + R() * 0.5;
+        const dm = new THREE.Mesh(dotGeo, M.white);
+        dm.position.set(Math.cos(a) * 0.09 * Math.cos(e), 0.11 + 0.072 * Math.sin(e), Math.sin(a) * 0.09 * Math.cos(e)); g.add(dm);
+      }
+      g.scale.setScalar(s); g.rotation.set((R() - 0.5) * 0.2, R() * PI, (R() - 0.5) * 0.2);
+      place(shadow(g), x, y, 0.0);
+    });
+
+    // info panel
+    if (cfg.panel.kind === 'plaque') {
+      const p = cfg.panel;
+      const box = new THREE.Mesh(new THREE.BoxGeometry(p.w, 0.1, p.h), M.wood); box.position.set(p.x, 0.04, -p.y);
+      box.castShadow = box.receiveShadow = true; root.add(box);
+      const top = new THREE.Mesh(new THREE.PlaneGeometry(p.w - 0.1, p.h - 0.1).rotateX(-PI / 2), new THREE.MeshStandardMaterial({ map: plaqueTex(), color: 0xc8c8c8, roughness: 0.95, metalness: 0 }));
+      top.position.set(p.x, 0.092, -p.y); top.receiveShadow = true; root.add(top);
+    } else {
+      const p = cfg.panel;
+      const box = new THREE.Mesh(new THREE.BoxGeometry(p.w, 0.12, p.h), M.stone); box.position.set(p.x, 0.05, -p.y);
+      box.castShadow = box.receiveShadow = true; root.add(box);
+      const top = new THREE.Mesh(new THREE.PlaneGeometry(p.w - 0.06, p.h - 0.06).rotateX(-PI / 2), new THREE.MeshStandardMaterial({ map: slabTex(), color: 0xd2d2d2, roughness: 0.95, metalness: 0 }));
+      top.position.set(p.x, 0.112, -p.y); top.receiveShadow = true; root.add(top);
+    }
+
+    // flowers
+    const fl = [];
+    let tries = 0;
+    while (fl.length < 46 && tries < 2000) {
+      tries++; const x = (R() - 0.5) * W, y = (R() - 0.5) * H;
+      if (ok(x, y, 0.06)) fl.push([x, y]);
+    }
+    const flowers = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.04, 0), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, flatShading: true }), fl.length);
+    const fcols = ['#fff6d8', '#ffd166', '#f4a6b8', '#c8a2e8', '#ffffff'].map(c => new THREE.Color(c));
+    const dm = new THREE.Object3D();
+    fl.forEach(([x, y], i) => { dm.position.set(x, height(x, y) + 0.05, -y); dm.updateMatrix(); flowers.setMatrixAt(i, dm.matrix); flowers.setColorAt(i, fcols[i % 5]); });
+    flowers.castShadow = true; root.add(flowers);
+
+    // floating pollen
+    const N = 34, pos = new Float32Array(N * 3), base = [];
+    for (let i = 0; i < N; i++) { const x = (R() - 0.5) * (W - 0.8), y = (R() - 0.5) * (H - 0.8), z = 0.25 + R() * 1.1; base.push([x, z, -y, R() * 6]); }
+    const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const pts = new THREE.Points(pg, new THREE.PointsMaterial({ size: 0.09, map: dot, transparent: true, opacity: 0.85, depthWrite: false, color: 0xfffbe6 }));
+    root.add(pts); pollenSets.push({ pg, base });
+
+    // a butterfly
+    const bf = new THREE.Group();
+    const wingG = new THREE.CircleGeometry(0.07, 10); wingG.rotateX(-PI / 2);
+    const wm = new THREE.MeshStandardMaterial({ color: cfg.bfColor, side: THREE.DoubleSide, roughness: 0.8 });
+    const wl = new THREE.Group(), wr = new THREE.Group();
+    const l = new THREE.Mesh(wingG, wm); l.position.x = 0.065; l.scale.z = 1.3; wl.add(l);
+    const r2 = new THREE.Mesh(wingG, wm); r2.position.x = -0.065; r2.scale.z = 1.3; wr.add(r2);
+    bf.add(wl, wr); shadow(bf); root.add(bf);
+    butterflies.push({ g: bf, wl, wr, c: cfg.bfPath, p: R() * 6 });
+  }
+
+  buildSide({
+    sign: 1, seed: 11, bfColor: '#f2a541', bfPath: [-0.9, 0.3, 0.85],
+    hills: [{ x: -2.3, y: 1.2, rx: 0.9, ry: 0.7, h: 0.7 }, { x: -0.6, y: 1.45, rx: 1.0, ry: 0.45, h: 0.42 }, { x: 2.45, y: 1.1, rx: 0.75, ry: 0.8, h: 0.85 }, { x: 2.6, y: -1.3, rx: 0.6, ry: 0.55, h: 0.38 }],
+    panel: { kind: 'plaque', x: -2.05, y: -1.25, w: 2.3, h: 1.0 },
+    pines: [[2.0, 1.05, 1.0], [-2.45, 1.35, 1.0], [-2.0, 1.0, 0.75], [-2.85, 0.85, 0.6], [2.5, 1.35, 1.1], [2.8, 0.8, 0.8], [2.15, 0.7, 0.6], [2.65, -1.25, 0.6]],
+    rounds: [[-0.5, 1.2, 1.15], [-0.3, 1.55, 0.9], [-1.15, 1.2, 0.75], [1.35, 1.45, 0.85], [-1.3, 0.25, 0.7]],
+    rocks: [[-0.65, -0.78, 0.14], [1.95, -0.75, 0.11], [1.8, 0.5, 0.16], [0.05, 0.78, 0.1], [-1.6, -0.35, 0.2], [3.0, 0.2, 0.13]],
+    mush: [[-0.7, -1.5, 1], [-0.55, -1.68, 0.7], [0.35, -1.62, 0.9], [-0.95, 0.75, 0.8], [2.15, -0.45, 1.0], [1.95, -1.55, 0.8]],
+    reedAngles: [2.6, -0.4]
+  });
+  buildSide({
+    sign: -1, seed: 29, bfColor: '#9fc5f0', bfPath: [0.3, -1.1, 0.7],
+    hills: [{ x: -2.45, y: 1.1, rx: 0.75, ry: 0.8, h: 0.85 }, { x: 0.6, y: 1.45, rx: 1.0, ry: 0.45, h: 0.45 }, { x: 2.3, y: 1.5, rx: 0.7, ry: 0.35, h: 0.32 }, { x: -2.6, y: -1.3, rx: 0.6, ry: 0.55, h: 0.4 }],
+    panel: { kind: 'slab', x: 2.55, y: -1.2, w: 1.32, h: 1.56 },
+    pines: [[1.0, 1.0, 0.95], [-2.5, 1.3, 1.1], [-2.8, 0.75, 0.75], [-2.1, 0.65, 0.65], [-2.6, -1.25, 0.7], [0.95, 1.55, 0.7]],
+    rounds: [[2.35, 0.25, 0.9], [-0.45, 1.3, 1.1], [0.35, 1.5, 0.9], [-1.25, 1.35, 0.8], [1.7, 1.55, 0.7], [-1.55, -1.5, 0.75], [0.9, -1.6, 0.65]],
+    rocks: [[0.6, 0.62, 0.15], [-2.0, -0.55, 0.18], [0.2, -1.08, 0.12], [1.1, -0.95, 0.14], [-0.2, 0.88, 0.1], [2.9, 1.15, 0.12]],
+    mush: [[-1.0, -1.6, 1], [-0.8, -1.75, 0.7], [1.0, 0.35, 0.9], [-1.85, 0.45, 0.8], [0.5, -1.65, 0.85], [1.2, -1.75, 0.7], [-0.1, 1.0, 0.75]],
+    reedAngles: [0.6, 3.6]
+  });
+
+  // ---------- interaction ----------
+  const el = renderer.domElement;
+  const REST_X = -0.42;
+  let rotY = 0, rotX = REST_X, velY = 0, dragging = false, settleOn = true, target = 0, idleAmt = 1;
+  let lastX = 0, lastY = 0, moved = 0, lastTap = 0;
+  const pts = new Map();
+  let pinchD = 0, pinchMX = 0, pinchMY = 0, wasPinch = false;
+  const pinchInfo = () => {
+    const [p, q] = [...pts.values()];
+    return { d: Math.hypot(p.x - q.x, p.y - q.y), mx: (p.x + q.x) / 2, my: (p.y + q.y) / 2 };
+  };
+  el.addEventListener('pointerdown', e => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { el.setPointerCapture(e.pointerId); } catch (err) {}
+    if (pts.size === 2) {                       // start pinch: stop rotating
+      const p = pinchInfo(); pinchD = p.d; pinchMX = p.mx; pinchMY = p.my;
+      dragging = false; wasPinch = true; settleOn = true; target = Math.round(rotY / PI) * PI;
+      return;
+    }
+    if (pts.size > 2) return;
+    wasPinch = false;
+    dragging = true; settleOn = false; velY = 0; moved = 0;
+    lastX = e.clientX; lastY = e.clientY;
+    el.classList.add('dragging');
+  });
+  el.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) {
+      const p = pinchInfo();
+      if (pinchD > 0) zoomAt(p.mx, p.my, p.d / pinchD);
+      panBy(pinchMX, pinchMY, p.mx, p.my);
+      pinchD = p.d; pinchMX = p.mx; pinchMY = p.my;
+      return;
+    }
+    if (!dragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY; moved += Math.abs(dx) + Math.abs(dy);
+    const k = 0.009 / Math.sqrt(zoomT);
+    rotY += dx * k; velY = dx * k;
+    rotX = THREE.MathUtils.clamp(rotX + dy * 0.006 / Math.sqrt(zoomT), -1.2, 0.5);
+  });
+  const end = e => {
+    pts.delete(e.pointerId);
+    if (pts.size === 1 && wasPinch) {           // one finger left after a pinch: don't jump into rotation
+      dragging = false; el.classList.remove('dragging'); return;
+    }
+    if (!dragging) return;
+    dragging = false; el.classList.remove('dragging');
+    if (moved < 8 && !wasPinch) {
+      const now = performance.now();
+      if (now - lastTap < 320) { if (zoomT > 1.15) { zoomT = 1; clampFocus(); } else flip(); lastTap = 0; } else lastTap = now;
+    }
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  el.addEventListener('wheel', e => {
+    e.preventDefault();
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    zoomAt(e.clientX, e.clientY, Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0015)));   // ctrlKey = trackpad pinch
+  }, { passive: false });
+  ['gesturestart', 'gesturechange'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
+  function flip() { velY = 0; target = Math.round(rotY / PI) * PI + PI; settleOn = true; }
+  document.getElementById('flip').addEventListener('click', flip);
+  if (!matchMedia('(pointer: coarse)').matches) document.getElementById('hint').textContent = 'Drag to spin · Scroll to zoom · Double-click to flip / reset zoom · Hold to open portfolio';
+
+  // ---------- long-press anywhere on the card → open portfolio ----------
+  (function () {
+    const HOLD = 650;
+    const ring = document.createElement('div'); ring.id = 'hold'; document.body.appendChild(ring);
+    const link = document.createElement('a'); link.id = 'toast'; link.href = CONFIG.link; link.target = '_blank'; link.rel = 'noopener';
+    link.textContent = 'Open portfolio ↗'; document.body.appendChild(link);
+    let t0 = 0, sx = 0, sy = 0, active = false, ready = false, raf = 0, showT = 0;
+    const cancel = () => { active = false; ready = false; cancelAnimationFrame(raf); clearTimeout(showT); ring.classList.remove('show', 'ready'); };
+    const draw = () => {
+      if (!active) return;
+      const p = Math.min(1, (performance.now() - t0) / HOLD);
+      ring.style.setProperty('--p', p);
+      if (p >= 1 && !ready) { ready = true; ring.classList.add('ready'); try { navigator.vibrate && navigator.vibrate(15); } catch (e) {} }
+      raf = requestAnimationFrame(draw);
+    };
+    el.addEventListener('pointerdown', e => {
+      if (pts.size > 1) { cancel(); return; }
+      active = true; ready = false; t0 = performance.now(); sx = e.clientX; sy = e.clientY;
+      ring.style.left = sx + 'px'; ring.style.top = sy + 'px'; ring.style.setProperty('--p', 0);
+      showT = setTimeout(() => { if (active) ring.classList.add('show'); }, 200);
+      draw();
+    });
+    el.addEventListener('pointermove', e => { if (active && (Math.hypot(e.clientX - sx, e.clientY - sy) > 10 || pts.size > 1)) cancel(); });
+    el.addEventListener('pointerup', () => {
+      const go = active && ready; cancel();
+      if (!go) return;
+      lastTap = 0;
+      link.classList.add('show'); setTimeout(() => link.classList.remove('show'), 4500);
+      try { link.click(); } catch (err) {}        // if the viewer blocks it, the button stays tappable for a few seconds
+    });
+    el.addEventListener('pointercancel', cancel);
+    el.addEventListener('contextmenu', e => e.preventDefault());
+  })();
+
+  // ---------- animation ----------
+  const clock = new THREE.Clock();
+  let lastT = 0, prevRY = 0, prevRX = -0.42, gustStart = 2;
+  const sw = new THREE.Vector2(), swV = new THREE.Vector2(), gustDir = new THREE.Vector2(1, 0.3).normalize();
+  const nV = new THREE.Vector3(), hV = new THREE.Vector3();
+  const dmy = new THREE.Object3D();
+  function tick() {
+    const t = clock.getElapsedTime();
+
+    if (!dragging) {
+      if (!settleOn) {
+        rotY += velY; velY *= 0.93;
+        if (Math.abs(velY) < 0.003) { target = Math.round(rotY / PI) * PI; settleOn = true; }
+      } else rotY += (target - rotY) * 0.07;
+      rotX += (REST_X - rotX) * 0.04;
+    }
+    zoom += (zoomT - zoom) * 0.18; focus.lerp(focusT, 0.18);
+    placeCamera();
+    idleAmt += ((dragging || zoomT > 1.3 ? 0 : 1) - idleAmt) * 0.03;
+    card.rotation.set(rotX + 0.05 * Math.sin(t * 0.6) * idleAmt, rotY + 0.16 * Math.sin(t * 0.33) * idleAmt, 0);
+    card.position.copy(focus).applyQuaternion(card.quaternion).negate();   // rotate around the zoomed-in point
+
+    // grass/trees lag behind when the card turns (spring), then settle
+    const dt = Math.min(0.05, Math.max(0.001, t - lastT)); lastT = t;
+    const dY = card.rotation.y - prevRY, dX = card.rotation.x - prevRX;
+    prevRY = card.rotation.y; prevRX = card.rotation.x;
+    swV.x += (-sw.x * 45 - swV.x * 5) * dt - dY * 3.2;
+    swV.y += (-sw.y * 45 - swV.y * 5) * dt + dX * 3.2;
+    sw.x = THREE.MathUtils.clamp(sw.x + swV.x * dt, -0.15, 0.15);
+    sw.y = THREE.MathUtils.clamp(sw.y + swV.y * dt, -0.15, 0.15);
+    FX.uSwing.value.set(sw.x, sw.y);
+    // occasional gusts sweeping across the meadow
+    const gt = t - gustStart, GD = 3.2;
+    if (gt > GD) {
+      gustStart = t + 2.5 + Math.random() * 5;
+      const ga = (Math.random() - 0.5) * 1.0 + (Math.random() < 0.5 ? 0 : PI);
+      gustDir.set(Math.cos(ga), Math.sin(ga) * 0.6).normalize();
+    }
+    const gStr = gt >= 0 && gt <= GD ? Math.sin(PI * gt / GD) : 0;
+    FX.uGust.value.set(-4.5 + 9 * Math.max(0, gt) / GD, gStr, gustDir.x, gustDir.y);
+    FX.uTime.value = t;
+    swayers.forEach(s => {
+      s.o.rotation.z = s.a * Math.sin(t * 1.3 + s.p) - (sw.x + gustDir.x * gStr * 0.04) * 1.3 * s.k;
+      s.o.rotation.x = s.a * 0.6 * Math.sin(t * 1.1 + s.p * 1.7) - s.sd * (sw.y + gustDir.y * gStr * 0.04) * 1.3 * s.k;
+    });
+    // sun glint strength per side: how well the face mirrors the sun into the camera
+    nV.set(0, 0, 1).applyQuaternion(card.quaternion);
+    hV.copy(camera.position).normalize().add(sunDir).normalize();
+    sparkles.forEach(sp => {
+      const f = Math.max(0, nV.dot(hV) * sp.sign);
+      sp.m.uniforms.uGlint.value = 0.06 + 0.55 * Math.pow(f, 30);
+      sp.m.uniforms.uTime.value = t;
+    });
+
+
+    pollenSets.forEach(({ pg, base }) => {
+      const a = pg.attributes.position.array;
+      base.forEach(([x, y, z, p], i) => {
+        a[i * 3] = x + Math.sin(t * 0.3 + p) * 0.25;
+        a[i * 3 + 1] = y + Math.sin(t * 0.5 + p * 2) * 0.15;
+        a[i * 3 + 2] = z + Math.cos(t * 0.25 + p) * 0.2;
+      });
+      pg.attributes.position.needsUpdate = true;
+    });
+
+    butterflies.forEach(b => {
+      const tt = t * 0.55 + b.p, [cx, cy, r] = b.c;
+      const x = cx + Math.cos(tt) * r, z = -(cy + Math.sin(tt * 1.3) * r * 0.6), y = 0.75 + Math.sin(t * 2.2 + b.p) * 0.12;
+      const nx = cx + Math.cos(tt + 0.05) * r, nz = -(cy + Math.sin((tt + 0.05) * 1.3) * r * 0.6);
+      b.g.position.set(x, y, z);
+      b.g.rotation.y = Math.atan2(nx - x, nz - z);
+      const f = 0.2 + 1.0 * Math.abs(Math.sin(t * 13 + b.p));
+      b.wl.rotation.z = f; b.wr.rotation.z = -f;
+    });
+
+    ripples.forEach(r => {
+      const life = 3.4, k = (t + r.phase) / life, cyc = Math.floor(k), u = k - cyc;
+      if (cyc !== r.cycle) {
+        r.cycle = cyc; const a = Math.random() * PI * 2, d = Math.random() * 0.55;
+        r.m.position.x = LAKE.x + LAKE.rx * d * Math.cos(a); r.m.position.y = LAKE.y + LAKE.ry * d * Math.sin(a);
+      }
+      r.m.scale.setScalar(0.04 + u * 0.32);
+      r.m.material.opacity = 0.55 * (1 - u) * Math.min(1, u * 6);
+    });
+
+    water.material.color.setHSL(0.53, 0.5, 0.5 + Math.sin(t * 0.8) * 0.02);
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+  tick();
+}
+</script>
+</body>
+</html>
