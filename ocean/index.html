@@ -97,7 +97,7 @@ async function init() {
 
   // ---------- renderer / camera ----------
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   const SIDES = [], GRASS = [], SHELLG = []; let perfFrames = 0, perfStart = -1, perfDone = false, perfStep = 0;
   document.body.prepend(renderer.domElement);
   if (REAL) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.35; }
@@ -453,7 +453,7 @@ async function init() {
     const ANEM = [0.55, 0.3];
     const reefMin = (x, z) => Math.min(-0.3, fy(x, z) + 1.3);   // stay above the coral tops                  // keep a clearing for the anemone
     const placed = TYPES.map(T => T.geos.map(() => []));
-    const step = MOBILE ? 0.5 : 0.34;
+    const step = 0.4;
     for (let x = -11; x <= 11; x += step) for (let z = -8; z <= 8; z += step) {
       const px = x + (R() - 0.5) * step * 0.9, pz = z + (R() - 0.5) * step * 0.9;
       const far = Math.max(Math.abs(px) / 3.3, Math.abs(pz) / 2.0);
