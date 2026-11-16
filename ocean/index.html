@@ -68,8 +68,9 @@ const CONFIG = {
   title: 'Interaction Design',
   school: 'ArtCenter College of Design',
   contact: 'Pasadena, CA',
-  link: 'https://your-portfolio.com',   // QR code target — replace with your real link
-  linkLabel: 'your-portfolio.com'
+  link: 'https://cuitianze081103-bot.github.io/portfolio/',   // portfolio (long-press)
+  qr: 'https://cuitianze081103-bot.github.io/3d-business-card/ocean/',   // QR opens this card
+  linkLabel: 'Evan Cui · 3D card'
 };
 /* ============================================ */
 
@@ -240,14 +241,14 @@ async function init() {
     const box = 384, bx = 64, by = 52;
     g.fillStyle = '#e8fbff'; roundRectPath(g, bx, by, box, box, 24); g.fill();
     if (typeof qrcode !== 'undefined') {
-      const qr = qrcode(0, 'M'); qr.addData(CONFIG.link); qr.make();
+      const qr = qrcode(0, 'M'); qr.addData(CONFIG.qr); qr.make();
       const n = qr.getModuleCount(), cell = Math.floor((box - 44) / n), ox = bx + (box - cell * n) / 2, oy = by + (box - cell * n) / 2;
       g.fillStyle = '#06243a';
       for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) g.fillRect(ox + x * cell, oy + y * cell, cell, cell);
     }
     g.textAlign = 'center'; g.fillStyle = '#bff3ff';
     try { g.letterSpacing = '6px'; } catch (e) {}
-    g.font = '600 28px Inter, sans-serif'; g.fillText('SCAN TO CONNECT', 256, 522);
+    g.font = '600 28px Inter, sans-serif'; g.fillText('SCAN TO OPEN', 256, 522);
     try { g.letterSpacing = '0px'; } catch (e) {}
     g.fillStyle = 'rgba(191,243,255,.7)'; g.font = '400 26px Inter, sans-serif'; g.fillText(CONFIG.linkLabel, 256, 572);
     const t = new THREE.CanvasTexture(c); t.anisotropy = maxAniso; return t;
