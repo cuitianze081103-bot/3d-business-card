@@ -860,13 +860,6 @@ async function init() {
     idleAmt += ((dragging || zoomT > 1.3 ? 0 : 1) - idleAmt) * 0.03;
     card.rotation.set(rotX + 0.05 * Math.sin(t * 0.6) * idleAmt, rotY + 0.16 * Math.sin(t * 0.33) * idleAmt, 0);
     card.position.copy(focus).applyQuaternion(card.quaternion).negate();
-    // ---- performance: only draw the face you can see (both while the card is edge-on) ----
-    {
-      const fn = new THREE.Vector3(0, 0, 1).applyQuaternion(card.quaternion);
-      const cd = new THREE.Vector3().copy(camera.position).sub(card.position).normalize();
-      const d = fn.dot(cd);
-      SIDES.forEach(sd => { sd.o.visible = sd.sign > 0 ? d > -0.25 : d < 0.25; });
-    }
     // ---- performance: step quality down until the device keeps up (resolution → grass → shadows) ----
     if (!perfDone) {
       perfFrames++;
