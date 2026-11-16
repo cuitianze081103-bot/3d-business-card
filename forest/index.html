@@ -99,7 +99,8 @@ async function init() {
 
   // ---------- renderer / scene ----------
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Math.min(innerWidth, innerHeight) < 700 ? 1.5 : 2));
+  const SIDES = []; let perfFrames = 0, perfStart = -1, perfDone = false;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.prepend(renderer.domElement);
@@ -164,7 +165,7 @@ async function init() {
   const sun = new THREE.DirectionalLight(0xfff0d4, 0.85);
   sun.position.set(5, 8, 9);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(Math.min(innerWidth, innerHeight) < 700 ? 1024 : 2048, Math.min(innerWidth, innerHeight) < 700 ? 1024 : 2048);
   Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 30 });
   sun.shadow.bias = -0.0008;
   sun.shadow.normalBias = 0.02;
@@ -388,8 +389,8 @@ async function init() {
   // ---------- shell texturing grass ----------
   // The same surface is drawn N times, each copy pushed a little further out along its normal.
   // Each layer keeps only the pixels whose "blade" (a hashed grid cell) is tall enough → fuzzy 3D grass.
-  const SHELLS = Math.min(innerWidth, innerHeight) < 700 ? 10 : 14, SHELL_H = 0.045;
-  const BLADES = Math.min(innerWidth, innerHeight) < 700 ? 90000 : 160000;   // real blades per side
+  const SHELLS = Math.min(innerWidth, innerHeight) < 700 ? 8 : 14, SHELL_H = 0.045;
+  const BLADES = Math.min(innerWidth, innerHeight) < 700 ? 55000 : 160000;   // real blades per side
 
   // shared wind / swing / gust uniforms (same objects referenced by every grass material)
   const sunDir = sun.position.clone().normalize();
@@ -531,7 +532,7 @@ async function init() {
     const sign = cfg.sign, R = rng(cfg.seed);
     const outer = new THREE.Group(); if (sign < 0) outer.rotation.y = PI;
     const root = new THREE.Group(); root.position.z = S; root.rotation.x = PI / 2;
-    outer.add(root); card.add(outer);
+    outer.add(root); card.add(outer); SIDES.push({ o: outer, sign });
     // view coords: (vx, vy) as seen when facing this side; diorama = (vx, height, -vy)
     const lake = { x: LAKE.x * sign, y: LAKE.y };
     // signed distances used to shape the terrain
@@ -566,7 +567,7 @@ async function init() {
     const tintAt = (x, y, h, jitter) => tmpC.copy(cLow).lerp(cHigh, Math.min(1, h / 0.65 + 0.15 * Math.sin(x * 3.1 + y * 2.2) + jitter));
 
     // terrain mesh (dense grid, triangles outside the card / inside the lake removed)
-    const NX = 200, NY = 124;
+    const NX = Math.min(innerWidth, innerHeight) < 700 ? 140 : 200, NY = Math.min(innerWidth, innerHeight) < 700 ? 86 : 124;
     const tg = new THREE.PlaneGeometry(W, H, NX, NY); tg.rotateX(-PI / 2);
     const pa = tg.attributes.position, keep = new Uint8Array(pa.count), tints = new Float32Array(pa.count * 3);
     for (let i = 0; i < pa.count; i++) {
@@ -858,7 +859,25 @@ async function init() {
     placeCamera();
     idleAmt += ((dragging || zoomT > 1.3 ? 0 : 1) - idleAmt) * 0.03;
     card.rotation.set(rotX + 0.05 * Math.sin(t * 0.6) * idleAmt, rotY + 0.16 * Math.sin(t * 0.33) * idleAmt, 0);
-    card.position.copy(focus).applyQuaternion(card.quaternion).negate();   // rotate around the zoomed-in point
+    card.position.copy(focus).applyQuaternion(card.quaternion).negate();
+    // ---- performance: only draw the face you can see (both while the card is edge-on) ----
+    {
+      const fn = new THREE.Vector3(0, 0, 1).applyQuaternion(card.quaternion);
+      const cd = new THREE.Vector3().copy(camera.position).sub(card.position).normalize();
+      const d = fn.dot(cd);
+      SIDES.forEach(sd => { sd.o.visible = sd.sign > 0 ? d > -0.25 : d < 0.25; });
+    }
+    // ---- performance: drop resolution once if the phone can't keep up ----
+    if (!perfDone) {
+      perfFrames++;
+      if (t > 1.0 && perfStart < 0) { perfStart = t; perfFrames = 0; }
+      if (perfStart > 0 && t - perfStart > 2.0) {
+        perfDone = true;
+        const fps = perfFrames / (t - perfStart);
+        if (fps < 45 && renderer.getPixelRatio() > 1) { renderer.setPixelRatio(1); fit(); }
+      }
+    }
+   // rotate around the zoomed-in point
 
     // grass/trees lag behind when the card turns (spring), then settle
     const dt = Math.min(0.05, Math.max(0.001, t - lastT)); lastT = t;
