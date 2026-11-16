@@ -97,8 +97,8 @@ async function init() {
 
   // ---------- renderer / camera ----------
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Math.min(innerWidth, innerHeight) < 700 ? 1.5 : 2));
-  const SIDES = []; let perfFrames = 0, perfStart = -1, perfDone = false;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  const SIDES = [], GRASS = [], SHELLG = []; let perfFrames = 0, perfStart = -1, perfDone = false, perfStep = 0;
   document.body.prepend(renderer.domElement);
   if (REAL) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.35; }
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
@@ -1076,14 +1076,16 @@ async function init() {
       const d = fn.dot(cd);
       SIDES.forEach(sd => { sd.o.visible = sd.sign > 0 ? d > -0.25 : d < 0.25; });
     }
-    // ---- performance: drop resolution once if the phone can't keep up ----
+    // ---- performance: step quality down until the device keeps up (resolution) ----
     if (!perfDone) {
       perfFrames++;
       if (t > 1.0 && perfStart < 0) { perfStart = t; perfFrames = 0; }
       if (perfStart > 0 && t - perfStart > 2.0) {
-        perfDone = true;
         const fps = perfFrames / (t - perfStart);
-        if (fps < 45 && renderer.getPixelRatio() > 1) { renderer.setPixelRatio(1); fit(); }
+        perfStart = t; perfFrames = 0;
+        if (fps >= 50) perfDone = true;
+        else if (perfStep === 0) { perfStep = 1; if (renderer.getPixelRatio() > 1) { renderer.setPixelRatio(1); fit(); } }
+        else perfDone = true;
       }
     }
 
