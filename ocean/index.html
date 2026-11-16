@@ -84,7 +84,7 @@ async function init() {
   const REAL = true;    // false = Version 1 (stylized), true = Version 2 (realistic)
   const W = 6.8, H = 4.2, T = 0.07, BEV = 0.02, S = T / 2 + BEV, FR = 0.13;   // thin card, thin frame
   const IW = W - 2 * FR, IH = H - 2 * FR;                                      // portal window size
-  const MOBILE = Math.min(innerWidth, innerHeight) < 700;
+  const MOBILE = true;   // same lighter settings on every device
 
   function rng(seed) {
     return function () {

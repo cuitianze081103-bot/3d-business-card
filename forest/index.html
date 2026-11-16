@@ -165,7 +165,7 @@ async function init() {
   const sun = new THREE.DirectionalLight(0xfff0d4, 0.85);
   sun.position.set(5, 8, 9);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(Math.min(innerWidth, innerHeight) < 700 ? 1024 : 2048, Math.min(innerWidth, innerHeight) < 700 ? 1024 : 2048);
+  sun.shadow.mapSize.set(true ? 1024 : 2048, true ? 1024 : 2048);
   Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 30 });
   sun.shadow.bias = -0.0008;
   sun.shadow.normalBias = 0.02;
@@ -389,8 +389,8 @@ async function init() {
   // ---------- shell texturing grass ----------
   // The same surface is drawn N times, each copy pushed a little further out along its normal.
   // Each layer keeps only the pixels whose "blade" (a hashed grid cell) is tall enough → fuzzy 3D grass.
-  const SHELLS = Math.min(innerWidth, innerHeight) < 700 ? 8 : 14, SHELL_H = 0.045;
-  const BLADES = Math.min(innerWidth, innerHeight) < 700 ? 55000 : 100000;   // real blades per side
+  const SHELLS = true ? 8 : 14, SHELL_H = 0.045;
+  const BLADES = true ? 55000 : 100000;   // real blades per side
 
   // shared wind / swing / gust uniforms (same objects referenced by every grass material)
   const sunDir = sun.position.clone().normalize();
@@ -567,7 +567,7 @@ async function init() {
     const tintAt = (x, y, h, jitter) => tmpC.copy(cLow).lerp(cHigh, Math.min(1, h / 0.65 + 0.15 * Math.sin(x * 3.1 + y * 2.2) + jitter));
 
     // terrain mesh (dense grid, triangles outside the card / inside the lake removed)
-    const NX = Math.min(innerWidth, innerHeight) < 700 ? 140 : 200, NY = Math.min(innerWidth, innerHeight) < 700 ? 86 : 124;
+    const NX = true ? 140 : 200, NY = true ? 86 : 124;
     const tg = new THREE.PlaneGeometry(W, H, NX, NY); tg.rotateX(-PI / 2);
     const pa = tg.attributes.position, keep = new Uint8Array(pa.count), tints = new Float32Array(pa.count * 3);
     for (let i = 0; i < pa.count; i++) {
