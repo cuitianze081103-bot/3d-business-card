@@ -39,13 +39,19 @@
     padding:11px 20px;border-radius:999px;background:rgba(255,255,255,.88);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 6px 20px rgba(0,0,0,.12)}
   #toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
   .copy{font-size:9px;letter-spacing:.06em;opacity:.35;margin-top:-4px}
+  #qrpop{position:fixed;inset:0;z-index:8;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    background:rgba(20,28,22,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);opacity:0;pointer-events:none;transition:opacity .2s}
+  #qrpop.show{opacity:1;pointer-events:auto}
+  #qrpop canvas{width:min(78vw,78vh,420px);height:auto;border-radius:22px;background:#fff;box-shadow:0 18px 50px rgba(0,0,0,.3);transform:scale(.92);transition:transform .25s}
+  #qrpop.show canvas{transform:scale(1)}
+  #qrpop .cap{font:600 12px Inter,system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#fff;opacity:.85}
 </style>
 </head>
 <body>
 <div id="msg">Growing the forest…</div>
 <div class="ui">
   <button id="flip">Flip card</button>
-  <div class="hint" id="hint">Drag to spin · Pinch to zoom · Double-tap to flip<br>Hold to open portfolio</div>
+  <div class="hint" id="hint">Drag to spin · Pinch to zoom · Double-tap to flip · Double-tap the QR to enlarge<br>Hold to open portfolio</div>
   <div class="copy">© 2026 Evan Cui. All rights reserved.</div>
 </div>
 
@@ -68,8 +74,9 @@ const CONFIG = {
   title: 'Interaction Design',
   school: 'ArtCenter College of Design',
   contact: 'Pasadena, CA',
-  link: 'https://your-portfolio.com',   // QR code target — replace with your real link
-  linkLabel: 'your-portfolio.com'
+  link: 'https://your-portfolio.com',   // portfolio (long-press) — replace with your real link
+  qr: 'https://cuitianze081103-bot.github.io/3d-business-card/forest/',   // QR opens this card
+  linkLabel: 'Evan Cui · 3D card'
 };
 /* ============================================ */
 
@@ -245,7 +252,7 @@ async function init() {
     const box = 452, bx = (512 - box) / 2, by = 24;
     g.fillStyle = '#fbf8f1'; roundRectPath(g, bx, by, box, box, 26); g.fill();
     if (typeof qrcode !== 'undefined') {
-      const qr = qrcode(0, 'M'); qr.addData(CONFIG.link); qr.make();
+      const qr = qrcode(0, 'M'); qr.addData(CONFIG.qr); qr.make();
       const n = qr.getModuleCount(), cell = Math.floor((box - 48) / n), off = bx + (box - cell * n) / 2, offY = by + (box - cell * n) / 2;
       g.fillStyle = '#2f4a2c';
       for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) g.fillRect(off + x * cell, offY + y * cell, cell, cell);
@@ -254,7 +261,7 @@ async function init() {
     }
     g.textAlign = 'center'; g.fillStyle = '#3c4a34';
     try { g.letterSpacing = '6px'; } catch (e) {}
-    g.font = '600 28px Inter, sans-serif'; g.fillText('SCAN TO CONNECT', 256, 530);
+    g.font = '600 28px Inter, sans-serif'; g.fillText('SCAN TO OPEN', 256, 530);
     try { g.letterSpacing = '0px'; } catch (e) {}
     g.fillStyle = 'rgba(60,74,52,.7)'; g.font = '400 26px Inter, sans-serif'; g.fillText(CONFIG.linkLabel, 256, 574);
     const t = new THREE.CanvasTexture(c); t.anisotropy = maxAniso; return t;
@@ -528,6 +535,7 @@ async function init() {
   }
 
   // ---------- build one face as a little diorama ----------
+  let qrTop = null;
   function buildSide(cfg) {
     const sign = cfg.sign, R = rng(cfg.seed);
     const outer = new THREE.Group(); if (sign < 0) outer.rotation.y = PI;
@@ -683,7 +691,7 @@ async function init() {
       const p = cfg.panel;
       const box = new THREE.Mesh(new THREE.BoxGeometry(p.w, 0.12, p.h), M.stone); box.position.set(p.x, 0.05, -p.y);
       box.castShadow = box.receiveShadow = true; root.add(box);
-      const top = new THREE.Mesh(new THREE.PlaneGeometry(p.w - 0.06, p.h - 0.06).rotateX(-PI / 2), new THREE.MeshStandardMaterial({ map: slabTex(), color: 0xd2d2d2, roughness: 0.95, metalness: 0 }));
+      const top = qrTop = new THREE.Mesh(new THREE.PlaneGeometry(p.w - 0.06, p.h - 0.06).rotateX(-PI / 2), new THREE.MeshStandardMaterial({ map: slabTex(), color: 0xd2d2d2, roughness: 0.95, metalness: 0 }));
       top.position.set(p.x, 0.112, -p.y); top.receiveShadow = true; root.add(top);
     }
 
@@ -781,6 +789,31 @@ async function init() {
     rotY += dx * k; velY = dx * k;
     rotX = THREE.MathUtils.clamp(rotX + dy * 0.006 / Math.sqrt(zoomT), -1.2, 0.5);
   });
+  // ---------- double-tap the QR stone → show the QR big for scanning ----------
+  const qrPop = document.createElement('div'); qrPop.id = 'qrpop';
+  {
+    const c = document.createElement('canvas'); c.width = c.height = 640;
+    const g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, 640, 640);
+    if (typeof qrcode !== 'undefined') {
+      const qr = qrcode(0, 'M'); qr.addData(CONFIG.qr); qr.make();
+      const n = qr.getModuleCount(), cell = Math.floor(560 / n), o = (640 - cell * n) / 2;
+      g.fillStyle = '#1f3320';
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) g.fillRect(o + x * cell, o + y * cell, cell, cell);
+    }
+    const cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = 'Scan to open this card · Tap to close';
+    qrPop.append(c, cap); document.body.appendChild(qrPop);
+    qrPop.addEventListener('click', () => qrPop.classList.remove('show'));
+  }
+  const qrRay = new THREE.Raycaster(), qrNdc = new THREE.Vector2();
+  function hitQR(sx, sy) {
+    if (!qrTop) return false;
+    card.updateMatrixWorld(); camera.updateMatrixWorld();
+    qrNdc.set(sx / innerWidth * 2 - 1, -(sy / innerHeight) * 2 + 1);
+    qrRay.setFromCamera(qrNdc, camera);
+    const h = qrRay.intersectObject(qrTop, false)[0];
+    return !!(h && h.face && h.face.normal.clone().transformDirection(qrTop.matrixWorld).dot(qrRay.ray.direction) < 0);
+  }
+
   const end = e => {
     pts.delete(e.pointerId);
     if (pts.size === 1 && wasPinch) {           // one finger left after a pinch: don't jump into rotation
@@ -790,7 +823,7 @@ async function init() {
     dragging = false; el.classList.remove('dragging');
     if (moved < 8 && !wasPinch) {
       const now = performance.now();
-      if (now - lastTap < 320) { if (zoomT > 1.15) { zoomT = 1; clampFocus(); } else flip(); lastTap = 0; } else lastTap = now;
+      if (now - lastTap < 320) { if (hitQR(e.clientX, e.clientY)) qrPop.classList.add('show'); else if (zoomT > 1.15) { zoomT = 1; clampFocus(); } else flip(); lastTap = 0; } else lastTap = now;
     }
   };
   el.addEventListener('pointerup', end);
@@ -803,7 +836,7 @@ async function init() {
   ['gesturestart', 'gesturechange'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
   function flip() { velY = 0; target = Math.round(rotY / PI) * PI + PI; settleOn = true; }
   document.getElementById('flip').addEventListener('click', flip);
-  if (!matchMedia('(pointer: coarse)').matches) document.getElementById('hint').textContent = 'Drag to spin · Scroll to zoom · Double-click to flip / reset zoom · Hold to open portfolio';
+  if (!matchMedia('(pointer: coarse)').matches) document.getElementById('hint').textContent = 'Drag to spin · Scroll to zoom · Double-click to flip · Double-click the QR to enlarge · Hold to open portfolio';
 
   // ---------- long-press anywhere on the card → open portfolio ----------
   (function () {
